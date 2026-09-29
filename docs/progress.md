@@ -1,0 +1,19 @@
+- [x] P0: критическое ядро обзвона
+  - [x] P0.1 Workspace, Docker Compose, PostgreSQL 16, миграции, health/readiness
+  - [x] P0.2 Schema/FK/indexes, IANA timezone validation, RLS с signed-JWT tenant context
+  - [x] P0.3 SQL `claim_next_contact`, `SKIP LOCKED`, active-attempt uniqueness, provider_call_id convention
+  - [x] P0.4 JWT API + HMAC raw-body webhook, dedup, bigint sequence, out-of-order/terminal state rules
+  - [x] P0.5 Terminal trigger + CRM transactional outbox, lease/retry/dead-state, correlation id
+  - [x] P0.6 6/6 pure unit tests пройдены; DB/API integration smoke добавлен, полный runtime-прогон выполняется `scripts/verify-p0.sh` в среде с Docker/PostgreSQL
+- [ ] P1: анализ звонка и UI
+  - [ ] P1.1 Общая Zod-схема результата и transcript fallback
+  - [ ] P1.2 POST/GET/cancel analysis, один analysis на attempt, persisted job state
+  - [ ] P1.3 Provider SSE, Retry-After 429, timeout/cancel/partial/error/invalid done
+  - [ ] P1.4 Persisted SSE journal + Last-Event-ID replay без повторной генерации
+  - [ ] P1.5 React 18/Vite/Tailwind одна страница с обязательными `data-state`
+  - [ ] P1.6 Сквозные проверки reconnect/cancel/partial/tenant isolation/transcript cases
+- [ ] P2: нагрузка и сдача
+  - [ ] P2.1 2 млн contacts, 5–20 workers: claim p95 <= 100 ms
+  - [ ] P2.2 Webhook 50 rps: p99 <= 1 s при slow/failing CRM
+  - [ ] P2.3 EXPLAIN/ошибки/окружение в performance report, исправление bottlenecks
+  - [ ] P2.4 Финальный clean `docker compose up -d`, README/ASSUMPTIONS/AI-USAGE и UI contract

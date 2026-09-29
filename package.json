@@ -1,0 +1,12 @@
+{
+  "name": "auto-calling",
+  "private": true,
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "build": "pnpm --filter @auto-calling/backend build",
+    "typecheck": "pnpm --filter @auto-calling/backend typecheck",
+    "test:p0": "pnpm --filter @auto-calling/backend test:p0",
+    "test:p0:integration": "pnpm --filter @auto-calling/backend test:p0:integration",
+    "jwt:generate": "pnpm --filter @auto-calling/backend jwt:generate"
+  }
+}
