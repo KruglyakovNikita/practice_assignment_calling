@@ -7,7 +7,7 @@ import type { requestContext } from '../http/request-context';
 
 const claimsSchema = z.object({
   sub: z.string().min(1),
-  org_id: z.string().uuid(),
+  org_id: z.guid(),
   role: z.enum(['worker', 'authenticated'])
 });
 

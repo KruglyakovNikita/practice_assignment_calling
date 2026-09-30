@@ -29,6 +29,8 @@ test('invalid done is error while already accumulated chunks remain persisted', 
       return true;
     },
     cancel: async () => true,
+    markStreamStarted: async () => undefined,
+    release: async () => undefined,
     recoverExpired: async () => 0
   };
 
@@ -45,7 +47,8 @@ test('invalid done is error while already accumulated chunks remain persisted', 
   const executions: analysisExecutionPort = {
     register: () => new AbortController().signal,
     abort: () => undefined,
-    unregister: () => undefined
+    unregister: () => undefined,
+    abortAll: () => undefined
   };
 
   const useCase = new ProcessNextAnalysisUseCase(jobs, provider, executions, {
@@ -57,4 +60,54 @@ test('invalid done is error while already accumulated chunks remain persisted', 
   assert.equal(await useCase.execute(), true);
   assert.equal(chunks, 1);
   assert.deepEqual(failed, { code: 'INVALID_PROVIDER_RESULT', partial: false });
+});
+
+test('shutdown mid-stream releases the job instead of failing it', async () => {
+  const controller = new AbortController();
+  const calls: string[] = [];
+  let claimed = false;
+
+  const jobs: analysisJobPort = {
+    claimNext: async () => claimed ? null : (claimed = true, job),
+    renewLease: async () => true,
+    isCancellationRequested: async () => false,
+    appendChunk: async () => {
+      calls.push('chunk');
+      controller.abort('shutdown');
+      return true;
+    },
+    complete: async () => (calls.push('complete'), true),
+    fail: async () => (calls.push('fail'), true),
+    cancel: async () => (calls.push('cancel'), true),
+    markStreamStarted: async () => { calls.push('stream_started'); },
+    release: async () => { calls.push('release'); },
+    recoverExpired: async () => 0
+  };
+
+  const provider: analysisProviderPort = {
+    open: async ({ signal }) => ({
+      kind: 'stream',
+      events: (async function* () {
+        yield { type: 'chunk' as const, field: 'summary', delta: 'partial' };
+        if (!signal.aborted) await new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+        throw new Error('aborted');
+      })()
+    })
+  };
+
+  const executions: analysisExecutionPort = {
+    register: () => controller.signal,
+    abort: () => undefined,
+    unregister: () => undefined,
+    abortAll: () => undefined
+  };
+
+  const useCase = new ProcessNextAnalysisUseCase(jobs, provider, executions, {
+    leaseMs: 30_000,
+    providerTimeoutMs: 5_000,
+    providerMaxRetries: 0
+  });
+
+  assert.equal(await useCase.execute(), true);
+  assert.deepEqual(calls, ['stream_started', 'chunk', 'release']);
 });

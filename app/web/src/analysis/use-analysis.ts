@@ -11,13 +11,24 @@ import { cancelAnalysis, createAnalysis, getAnalysis, streamAnalysis } from '../
 
 export type analysisViewState = 'idle' | 'queued' | 'streaming' | 'reconnecting' | 'partial' | 'error' | 'cancelled' | 'completed';
 
+export type sseLogEntry = {
+  at: string;
+  kind: 'connect' | 'event' | 'disconnect';
+  id?: string;
+  event?: string;
+  data?: unknown;
+  note?: string;
+};
+
 export function useAnalysis() {
   const [state, setState] = useState<analysisViewState>('idle');
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [partial, setPartial] = useState<analysisPartialResult>({});
   const [result, setResult] = useState<analysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [log, setLog] = useState<sseLogEntry[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
+  const connectionRef = useRef<AbortController | null>(null);
   const lastEventIdRef = useRef('0');
   const stateRef = useRef<analysisViewState>('idle');
 
@@ -28,6 +39,10 @@ export function useAnalysis() {
     setState(next);
   }
 
+  function addLog(entry: Omit<sseLogEntry, 'at'>): void {
+    setLog((current) => [...current, { ...entry, at: new Date().toLocaleTimeString() }]);
+  }
+
   async function start(token: string, callAttemptId: string): Promise<void> {
     controllerRef.current?.abort();
     const controller = new AbortController();
@@ -36,11 +51,12 @@ export function useAnalysis() {
     setPartial({});
     setResult(null);
     setError(null);
+    setLog([]);
 
     try {
       const created = await createAnalysis(token, callAttemptId);
       setAnalysisId(created.id);
-      changeState(toViewState(created.status));
+      changeState(created.status);
       await consume(token, created.id, controller.signal);
     } catch (cause) {
       if (controller.signal.aborted) return;
@@ -56,35 +72,40 @@ export function useAnalysis() {
       if (response.status === 'cancelled') changeState('cancelled');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось отменить анализ');
-      changeState('error');
     }
+  }
+
+  // Simulates a network drop of the current SSE connection; the loop reconnects with Last-Event-ID.
+  function dropConnection(): void {
+    connectionRef.current?.abort();
   }
 
   async function consume(token: string, id: string, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
+      const connection = new AbortController();
+      connectionRef.current = connection;
+      const connectionSignal = AbortSignal.any([signal, connection.signal]);
       const watcher = new AbortController();
-      const combinedWatcherSignal = AbortSignal.any([signal, watcher.signal]);
-      const watchPromise = watchStreamingState(token, id, combinedWatcherSignal, changeState, stateRef);
+      const watchPromise = watchStreamingState(token, id, AbortSignal.any([connectionSignal, watcher.signal]), changeState, stateRef);
+      const resumeFrom = lastEventIdRef.current;
+      addLog({ kind: 'connect', note: resumeFrom === '0' ? 'GET /stream' : `GET /stream, Last-Event-ID: ${resumeFrom}` });
       try {
         await streamAnalysis({
           token,
           analysisId: id,
-          lastEventId: lastEventIdRef.current,
-          signal,
+          lastEventId: resumeFrom,
+          signal: connectionSignal,
           onMessage: (message) => {
             if (message.id) lastEventIdRef.current = message.id;
+            addLog({ kind: 'event', id: message.id, event: message.event, data: message.data });
             if (message.event === 'chunk') {
               const parsed = analysisChunkPayloadSchema.parse(message.data);
-              setPartial((current) => ({
-                ...current,
-                [parsed.field]: `${current[parsed.field] ?? ''}${parsed.delta}`
-              }));
-              if (!isViewTerminal(stateRef.current)) changeState('streaming');
+              setPartial((current) => ({ ...current, [parsed.field]: `${current[parsed.field] ?? ''}${parsed.delta}` }));
+              if (!isTerminal(stateRef.current)) changeState('streaming');
               return;
             }
             if (message.event === 'done') {
-              const parsed = analysisDonePayloadSchema.parse(message.data);
-              setResult(parsed.result);
+              setResult(analysisDonePayloadSchema.parse(message.data).result);
               changeState('completed');
               return;
             }
@@ -97,12 +118,13 @@ export function useAnalysis() {
         });
         watcher.abort();
         await watchPromise;
+        addLog({ kind: 'disconnect', note: 'сервер закрыл поток' });
 
         const current = await getAnalysis(token, id);
         setPartial(current.partial_result);
         setResult(current.result);
         if (isTerminal(current.status)) {
-          changeState(toViewState(current.status));
+          changeState(current.status);
           if (current.error?.message) setError(current.error.message);
           return;
         }
@@ -111,14 +133,16 @@ export function useAnalysis() {
         watcher.abort();
         await watchPromise;
         if (signal.aborted) return;
-        setError(cause instanceof Error ? cause.message : 'SSE соединение потеряно');
+        const dropped = connection.signal.aborted;
+        addLog({ kind: 'disconnect', note: dropped ? 'соединение разорвано вручную' : cause instanceof Error ? cause.message : 'ошибка сети' });
+        if (!dropped) setError(cause instanceof Error ? cause.message : 'SSE соединение потеряно');
         changeState('reconnecting');
       }
       await delay(800, signal);
     }
   }
 
-  return { state, analysisId, partial, result, error, start, cancel };
+  return { state, analysisId, partial, result, error, log, start, cancel, dropConnection };
 }
 
 async function watchStreamingState(
@@ -131,7 +155,7 @@ async function watchStreamingState(
   while (!signal.aborted) {
     try {
       const current = await getAnalysis(token, analysisId);
-      if (current.status === 'streaming' && !isViewTerminal(stateRef.current)) changeState('streaming');
+      if (current.status === 'streaming' && !isTerminal(stateRef.current)) changeState('streaming');
       if (isTerminal(current.status)) return;
     } catch {
       return;
@@ -140,15 +164,7 @@ async function watchStreamingState(
   }
 }
 
-function toViewState(status: analysisStatus): analysisViewState {
-  return status;
-}
-
-function isTerminal(status: analysisStatus): boolean {
-  return status === 'completed' || status === 'partial' || status === 'error' || status === 'cancelled';
-}
-
-function isViewTerminal(status: analysisViewState): boolean {
+function isTerminal(status: analysisStatus | analysisViewState): boolean {
   return status === 'completed' || status === 'partial' || status === 'error' || status === 'cancelled';
 }
 

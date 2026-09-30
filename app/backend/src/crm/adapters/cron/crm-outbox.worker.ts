@@ -8,7 +8,8 @@ import { RUNTIME_CONFIG } from '../../../shared/config/config.module';
 export class CrmOutboxWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CrmOutboxWorker.name);
   private timer: NodeJS.Timeout | null = null;
-  private running = false;
+  private current: Promise<void> | null = null;
+  private stopping = false;
 
   constructor(
     private readonly deliver: DeliverCrmNotificationsUseCase,
@@ -16,23 +17,22 @@ export class CrmOutboxWorker implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    this.timer = setInterval(() => void this.tick(), this.config.crmPollMs);
-    void this.tick();
+    this.timer = setInterval(() => this.tick(), this.config.crmPollMs);
+    this.tick();
   }
 
-  onModuleDestroy(): void {
+  // Graceful stop: no new batches, but deliveries already sent to the CRM get their result
+  // recorded, so a restart does not re-send them (at-least-once only after a hard kill).
+  async onModuleDestroy(): Promise<void> {
+    this.stopping = true;
     if (this.timer) clearInterval(this.timer);
+    await this.current;
   }
 
-  private async tick(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
-    try {
-      await this.deliver.execute();
-    } catch (error) {
-      this.logger.error(error instanceof Error ? error.message : 'CRM outbox tick failed');
-    } finally {
-      this.running = false;
-    }
+  private tick(): void {
+    if (this.current || this.stopping) return;
+    this.current = this.deliver.execute()
+      .catch((error) => this.logger.error(error instanceof Error ? error.message : 'CRM outbox tick failed'))
+      .finally(() => { this.current = null; });
   }
 }

@@ -32,3 +32,7 @@ export class JsonLogger implements LoggerService {
     process.stdout.write(`${JSON.stringify(output)}\n`);
   }
 }
+
+export function logEvent(event: string, fields: Record<string, unknown>, level: 'info' | 'warn' | 'error' = 'info'): void {
+  process.stdout.write(`${JSON.stringify({ level, time: new Date().toISOString(), event, ...fields })}\n`);
+}

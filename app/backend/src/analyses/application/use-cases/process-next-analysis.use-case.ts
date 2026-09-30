@@ -31,6 +31,7 @@ export class ProcessNextAnalysisUseCase {
 
     try {
       await this.process(job, signal);
+      if (signal.aborted && signal.reason === 'shutdown') await this.jobs.release(job.id, job.leaseToken);
     } finally {
       clearInterval(heartbeat);
       this.executions.unregister(job.id);
@@ -49,8 +50,9 @@ export class ProcessNextAnalysisUseCase {
         return;
       }
 
+      // Idle timeout: reset on every provider event, so a slow but live stream is not cut off.
       const timeout = new AbortController();
-      const timeoutHandle = setTimeout(() => timeout.abort(), this.config.providerTimeoutMs);
+      let timeoutHandle = setTimeout(() => timeout.abort(), this.config.providerTimeoutMs);
       const signal = AbortSignal.any([cancellationSignal, timeout.signal]);
 
       try {
@@ -65,7 +67,10 @@ export class ProcessNextAnalysisUseCase {
           continue;
         }
 
+        await this.jobs.markStreamStarted(job.id, job.leaseToken);
         for await (const event of response.events) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = setTimeout(() => timeout.abort(), this.config.providerTimeoutMs);
           if (await this.shouldCancel(job, cancellationSignal)) {
             await this.jobs.cancel(job.id, job.leaseToken);
             return;

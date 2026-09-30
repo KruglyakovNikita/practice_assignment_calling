@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../../../shared/auth/jwt-auth.guard';
 import type { requestContext } from '../../../shared/http/request-context';
 import { ClaimNextContactUseCase } from '../../application/use-cases/claim-next-contact.use-case';
 
-const claimSchema = z.object({ campaign_id: z.string().uuid() }).strict();
+const claimSchema = z.object({ campaign_id: z.guid() });
 
 @Controller('rpc')
 export class ClaimController {

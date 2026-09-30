@@ -14,7 +14,7 @@ for (let i = 2; i < process.argv.length; i += 1) {
 }
 
 const input = z.object({
-  orgId: z.string().uuid(),
+  orgId: z.guid(),
   sub: z.string().min(1),
   role: z.enum(['worker', 'authenticated']),
   secret: z.string().min(1)

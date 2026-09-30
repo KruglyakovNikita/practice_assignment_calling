@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, HttpCode, NotFoundException, Post, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
+import { logEvent } from '../../../shared/logging/json-logger';
 import { extractTopLevelInteger } from '../../../shared/http/extract-top-level-integer';
 import type { requestContext } from '../../../shared/http/request-context';
 import { CallNotFoundError } from '../../application/ports/call-event.port';
@@ -51,9 +52,18 @@ export class CallsWebhookController {
         rawPayload: req.rawBody.toString('utf8'),
         correlationId: req.correlationId
       });
+      logEvent('webhook_event', {
+        correlation_id: req.correlationId,
+        event_id: parsed.data.event_id,
+        call_id: parsed.data.call_id,
+        sequence: sequence.toString(),
+        type: parsed.data.type,
+        duplicate: result.duplicate
+      });
       return { ok: true, duplicate: result.duplicate };
     } catch (error) {
       if (error instanceof CallNotFoundError) {
+        logEvent('webhook_event_rejected', { correlation_id: req.correlationId, event_id: parsed.data.event_id, call_id: parsed.data.call_id, reason: 'CALL_NOT_FOUND' }, 'warn');
         throw new NotFoundException({ code: 'CALL_NOT_FOUND' });
       }
       throw error;

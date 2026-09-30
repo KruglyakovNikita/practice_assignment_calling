@@ -1,5 +1,9 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+export function signWebhookBody(rawBody: string, secret: string): string {
+  return `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
+}
+
 export function verifyWebhookSignature(rawBody: Buffer, signature: string | undefined, secret: string): boolean {
   if (!signature?.startsWith('sha256=')) return false;
   const hex = signature.slice('sha256='.length);

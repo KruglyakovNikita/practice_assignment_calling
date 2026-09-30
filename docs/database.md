@@ -1,6 +1,14 @@
 # PostgreSQL 16 — фактическая модель P0 + P1
 
-Миграции: `001_p0_core.sql`, `002_p1_analysis.sql`.
+Миграции: `001_p0_core.sql`, `002_p1_analysis.sql`, `003_p1_claim_lock_grant.sql`, `004_p2_claim_performance.sql`.
+
+## P2 (004)
+
+- `app_private.timezones` — снимок `pg_timezone_names` для быстрой валидации IANA-зоны.
+- `contacts.active_attempt_id` — маркер незавершённой попытки, ведётся триггерами `call_attempts`.
+- `contacts_claim_ready_idx (campaign_id, timezone, coalesce(last_attempt_at,-inf), id)` partial `WHERE do_not_call=false AND attempts_count<3 AND active_attempt_id IS NULL`; старый `contacts_claim_lookup_idx` удалён.
+- `claim_next_contact` — `SECURITY DEFINER`, loose index scan по зонам кампании + проба `SKIP LOCKED` на зону.
+- Defaults `gen_random_uuid()` для id; `SELECT` на `webhook_events` для сервисной роли.
 
 ## P0 core
 

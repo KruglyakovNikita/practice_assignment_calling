@@ -1,8 +1,8 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { analysisAbortReason, analysisExecutionPort } from '../../application/ports/analysis-execution.port';
 
 @Injectable()
-export class InMemoryAnalysisExecutionRegistry implements analysisExecutionPort, OnModuleDestroy {
+export class InMemoryAnalysisExecutionRegistry implements analysisExecutionPort {
   private readonly controllers = new Map<string, AbortController>();
 
   register(analysisId: string): AbortSignal {
@@ -19,8 +19,7 @@ export class InMemoryAnalysisExecutionRegistry implements analysisExecutionPort,
     this.controllers.delete(analysisId);
   }
 
-  onModuleDestroy(): void {
-    for (const controller of this.controllers.values()) controller.abort('shutdown');
-    this.controllers.clear();
+  abortAll(reason: analysisAbortReason): void {
+    for (const controller of this.controllers.values()) controller.abort(reason);
   }
 }

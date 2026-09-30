@@ -13,7 +13,8 @@ import {
   Req,
   Sse,
   UseGuards,
-  type MessageEvent
+  type MessageEvent,
+  type OnModuleDestroy
 } from '@nestjs/common';
 import { z } from 'zod';
 import { Observable } from 'rxjs';
@@ -29,13 +30,16 @@ import { CreateAnalysisUseCase } from '../../application/use-cases/create-analys
 import { GetAnalysisUseCase } from '../../application/use-cases/get-analysis.use-case';
 import { StreamAnalysisEventsUseCase } from '../../application/use-cases/stream-analysis-events.use-case';
 
-const createSchema = z.object({ call_attempt_id: z.string().uuid() }).strict();
-const idSchema = z.string().uuid();
+const createSchema = z.object({ call_attempt_id: z.guid() });
+const idSchema = z.guid();
 const eventIdSchema = z.string().regex(/^\d+$/);
 
 @Controller('api/analyses')
 @UseGuards(JwtAuthGuard)
-export class AnalysesController {
+export class AnalysesController implements OnModuleDestroy {
+  // Ends open SSE responses on shutdown so the HTTP server can drain; clients resume with Last-Event-ID.
+  private readonly shutdown = new AbortController();
+
   constructor(
     private readonly createAnalysis: CreateAnalysisUseCase,
     private readonly getAnalysis: GetAnalysisUseCase,
@@ -132,7 +136,7 @@ export class AnalysesController {
             tenantToken: principal.token,
             analysisId,
             afterId,
-            signal: controller.signal
+            signal: AbortSignal.any([controller.signal, this.shutdown.signal])
           })) {
             if (subscriber.closed) break;
             subscriber.next({ id: event.id, type: event.type, data: event.payload });
@@ -145,6 +149,10 @@ export class AnalysesController {
 
       return () => controller.abort();
     });
+  }
+
+  onModuleDestroy(): void {
+    this.shutdown.abort();
   }
 
   private parseId(id: string): string {

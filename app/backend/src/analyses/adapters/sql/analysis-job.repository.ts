@@ -4,6 +4,14 @@ import type { Pool, PoolClient } from 'pg';
 import { ADMIN_DB_POOL } from '../../../shared/database/tokens';
 import type { analysisJob, analysisJobPort } from '../../application/ports/analysis-job.port';
 
+type interruptedRow = {
+  id: string;
+  org_id: string;
+  cancel_requested: boolean;
+  stream_started: boolean;
+  has_partial: boolean;
+};
+
 @Injectable()
 export class AnalysisJobRepository implements analysisJobPort {
   constructor(@Inject(ADMIN_DB_POOL) private readonly pool: Pool) {}
@@ -27,7 +35,6 @@ export class AnalysisJobRepository implements analysisJobPort {
       ), claimed AS (
         UPDATE public.analyses a
            SET status = 'streaming',
-               provider_started_at = COALESCE(provider_started_at, now()),
                lease_token = gen_random_uuid(),
                lease_until = now() + ($1::bigint * interval '1 millisecond'),
                updated_at = now()
@@ -202,15 +209,32 @@ export class AnalysisJobRepository implements analysisJobPort {
     });
   }
 
+  async markStreamStarted(analysisId: string, leaseToken: string): Promise<void> {
+    await this.pool.query(`
+      UPDATE public.analyses
+         SET provider_started_at = now(), updated_at = now()
+       WHERE id = $1::uuid AND lease_token = $2::uuid AND status = 'streaming'
+    `, [analysisId, leaseToken]);
+  }
+
+  async release(analysisId: string, leaseToken: string): Promise<void> {
+    await this.inTransaction(async (client) => {
+      const locked = await client.query<interruptedRow>(`
+        SELECT id, org_id, cancel_requested, provider_started_at IS NOT NULL AS stream_started,
+               partial_result <> '{}'::jsonb AS has_partial
+          FROM public.analyses
+         WHERE id = $1::uuid AND lease_token = $2::uuid AND status = 'streaming'
+         FOR UPDATE
+      `, [analysisId, leaseToken]);
+      if (locked.rows[0]) await this.settleInterrupted(client, locked.rows[0], 'WORKER_SHUTDOWN');
+    });
+  }
+
   async recoverExpired(limit: number): Promise<number> {
     return this.inTransaction(async (client) => {
-      const expired = await client.query<{
-        id: string;
-        org_id: string;
-        cancel_requested: boolean;
-        has_partial: boolean;
-      }>(`
-        SELECT id, org_id, cancel_requested, partial_result <> '{}'::jsonb AS has_partial
+      const expired = await client.query<interruptedRow>(`
+        SELECT id, org_id, cancel_requested, provider_started_at IS NOT NULL AS stream_started,
+               partial_result <> '{}'::jsonb AS has_partial
           FROM public.analyses
          WHERE status = 'streaming'
            AND lease_until < now()
@@ -219,27 +243,40 @@ export class AnalysisJobRepository implements analysisJobPort {
          LIMIT $1
       `, [limit]);
 
-      for (const row of expired.rows) {
-        const status = row.cancel_requested ? 'cancelled' : row.has_partial ? 'partial' : 'error';
-        const code = row.cancel_requested ? 'CANCELLED' : 'WORKER_INTERRUPTED';
-        const message = row.cancel_requested ? 'Analysis cancelled' : 'Analysis worker stopped before completion';
-        await client.query(`
-          UPDATE public.analyses
-             SET status = $2,
-                 error_code = $3,
-                 error_message = $4,
-                 lease_until = NULL,
-                 lease_token = NULL,
-                 updated_at = now()
-           WHERE id = $1::uuid
-        `, [row.id, status, code, message]);
-        await client.query(`
-          INSERT INTO public.analysis_events(analysis_id, org_id, event_type, payload)
-          VALUES ($1::uuid, $2::uuid, 'error', $3::jsonb)
-        `, [row.id, row.org_id, JSON.stringify({ code, message, status })]);
-      }
+      for (const row of expired.rows) await this.settleInterrupted(client, row, 'WORKER_INTERRUPTED');
       return expired.rowCount ?? 0;
     });
+  }
+
+  // Interrupted job: provider stream never started -> nothing was generated, queue it again;
+  // stream had started -> never re-sent (task 7.2), finish as partial/error; a pending cancel wins.
+  private async settleInterrupted(client: PoolClient, row: interruptedRow, reason: string): Promise<void> {
+    if (!row.cancel_requested && !row.stream_started) {
+      await client.query(`
+        UPDATE public.analyses
+           SET status = 'queued', lease_until = NULL, lease_token = NULL, updated_at = now()
+         WHERE id = $1::uuid
+      `, [row.id]);
+      return;
+    }
+
+    const status = row.cancel_requested ? 'cancelled' : row.has_partial ? 'partial' : 'error';
+    const code = row.cancel_requested ? 'CANCELLED' : reason;
+    const message = row.cancel_requested ? 'Analysis cancelled' : 'Analysis worker stopped before completion';
+    await client.query(`
+      UPDATE public.analyses
+         SET status = $2,
+             error_code = $3,
+             error_message = $4,
+             lease_until = NULL,
+             lease_token = NULL,
+             updated_at = now()
+       WHERE id = $1::uuid
+    `, [row.id, status, code, message]);
+    await client.query(`
+      INSERT INTO public.analysis_events(analysis_id, org_id, event_type, payload)
+      VALUES ($1::uuid, $2::uuid, 'error', $3::jsonb)
+    `, [row.id, row.org_id, JSON.stringify({ code, message, status })]);
   }
 
   private async finish(

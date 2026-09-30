@@ -1,10 +1,10 @@
 # Сервис управления обзвоном — инструкции Codex
 
-P0 и P1 реализованы. Текущая цель — P2 из `docs/progress.md`; P0/P1 invariants менять только при доказанной ошибке.
+P0, P1 и P2 выполнены (`docs/performance.md`); P0/P1 invariants менять только при доказанной ошибке.
 
 ## Source of truth
 
-Читать: `docs/progress.md`, `docs/tz.md`, `docs/decisions.md`, `docs/architecture.md`, `docs/database.md`, `ASSUMPTIONS.md`, `docs/code-style.md`, `docs/p1-completion.md`. Исходники задания и ответы заказчика не менять по смыслу.
+Читать: `docs/progress.md`, `docs/tz.md`, `docs/decisions.md`, `docs/architecture.md`, `docs/database.md`, `ASSUMPTIONS.md`, `docs/code-style.md`, `docs/performance.md`. Исходники задания и ответы заказчика не менять по смыслу.
 
 `.claude/` и `CLAUDE.md` — архив, не действующие инструкции.
 

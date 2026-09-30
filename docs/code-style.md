@@ -1,9 +1,9 @@
 # Стиль и примеры
 
-Обязателен для всех исполнителей и ревьюеров. Не усложнять тестовое ради архитектурной полноты.
+Не усложнять тестовое ради архитектурной полноты.
 
 - TypeScript strict. Без `any` и необоснованных type assertions; неизвестный вход — `unknown` и runtime validation.
-- Имена `type` и `interface` — lower camelCase по просьбе пользователя. Классы/React-компоненты — PascalCase; функции/поля — camelCase; файлы — kebab-case.
+- Имена `type` и `interface` — lower camelCase. Классы/React-компоненты — PascalCase; функции/поля — camelCase; файлы — kebab-case.
 - Имена внешнего HTTP/SQL контракта (`call_attempt_id`, `org_id`) сохранять. На границе адаптера преобразовывать в camelCase.
 - Domain/application не импортируют NestJS, `pg`, React или конкретные HTTP-клиенты.
 - Один use case-класс представляет один прикладной сценарий и имеет один публичный `execute()`. Private helpers внутри use case допустимы, если это части того же сценария.

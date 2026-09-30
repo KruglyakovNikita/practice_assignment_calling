@@ -31,6 +31,10 @@ export interface analysisJobPort {
     partial: boolean;
   }): Promise<boolean>;
   cancel(analysisId: string, leaseToken: string): Promise<boolean>;
+  /** Provider answered 200 text/event-stream: from here on the job must never be re-sent. */
+  markStreamStarted(analysisId: string, leaseToken: string): Promise<void>;
+  /** Worker stops without a result: back to queue if the stream never started, else partial/error. */
+  release(analysisId: string, leaseToken: string): Promise<void>;
   recoverExpired(limit: number): Promise<number>;
 }
 

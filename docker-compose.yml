@@ -5,13 +5,19 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
+      # First-run initdb only: skip per-file fsync (on HDD it took ~3 min). The running server keeps
+      # fsync on; a crash during that one-time init would just mean re-creating an empty volume.
+      POSTGRES_INITDB_ARGS: "--no-sync"
     ports:
       - "54329:5432"
+    # TCP probe: the temporary server of the first-run initdb listens on the socket only, so it
+    # is not reported healthy before the real server. start_period covers a slow initdb (HDD).
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
       interval: 2s
-      timeout: 2s
+      timeout: 5s
       retries: 30
+      start_period: 300s
     volumes:
       - auto-calling-db:/var/lib/postgresql/data
 
@@ -49,13 +55,14 @@ services:
       CRM_URL: ${CRM_URL}
       PROVIDER_URL: ${PROVIDER_URL}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
-      CRM_TIMEOUT_MS: ${CRM_TIMEOUT_MS:-1500}
-      CRM_MAX_ATTEMPTS: ${CRM_MAX_ATTEMPTS:-8}
-      CRM_BATCH_SIZE: ${CRM_BATCH_SIZE:-20}
-      CRM_LEASE_MS: ${CRM_LEASE_MS:-15000}
+      DEV_TOOLS: ${DEV_TOOLS:-false}
+      CRM_TIMEOUT_MS: ${CRM_TIMEOUT_MS:-10000}
+      CRM_MAX_ATTEMPTS: ${CRM_MAX_ATTEMPTS:-20}
+      CRM_BATCH_SIZE: ${CRM_BATCH_SIZE:-50}
+      CRM_LEASE_MS: ${CRM_LEASE_MS:-30000}
       CRM_POLL_MS: ${CRM_POLL_MS:-1000}
       CRM_RETRY_BASE_MS: ${CRM_RETRY_BASE_MS:-1000}
-      CRM_RETRY_MAX_MS: ${CRM_RETRY_MAX_MS:-60000}
+      CRM_RETRY_MAX_MS: ${CRM_RETRY_MAX_MS:-300000}
       ANALYSIS_POLL_MS: ${ANALYSIS_POLL_MS:-200}
       ANALYSIS_LEASE_MS: ${ANALYSIS_LEASE_MS:-30000}
       ANALYSIS_CONCURRENCY: ${ANALYSIS_CONCURRENCY:-4}
@@ -65,13 +72,16 @@ services:
       ANALYSIS_SSE_POLL_MS: ${ANALYSIS_SSE_POLL_MS:-150}
     ports:
       - "8080:8080"
+    # SIGTERM -> finish in-flight webhooks/CRM sends/analyses before exit (see ASSUMPTIONS).
+    stop_grace_period: 30s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
-      timeout: 2s
+      timeout: 5s
       retries: 20
+      start_period: 120s
 
   web:
     build:
@@ -82,6 +92,26 @@ services:
         condition: service_healthy
     ports:
       - "5173:5173"
+
+  # Dev stubs, off by default (the checker supplies its own CRM/provider):
+  #   PROVIDER_URL=http://mock-provider:18082 CRM_URL=http://mock-crm:18081 docker compose --profile mocks up -d
+  mock-provider:
+    profiles: ["mocks"]
+    build:
+      context: ./scripts
+      dockerfile_inline: |
+        FROM node:22-alpine
+        COPY mock-analysis-provider.mjs /app/
+        CMD ["node", "/app/mock-analysis-provider.mjs"]
+
+  mock-crm:
+    profiles: ["mocks"]
+    build:
+      context: ./scripts
+      dockerfile_inline: |
+        FROM node:22-alpine
+        COPY mock-crm.mjs /app/
+        CMD ["node", "/app/mock-crm.mjs"]
 
 volumes:
   auto-calling-db:

@@ -11,9 +11,11 @@
   - [x] P1.3 Provider SSE, Retry-After 429, timeout/cancel/partial/error/invalid done
   - [x] P1.4 Persisted SSE journal + stable id + Last-Event-ID replay без повторной генерации
   - [x] P1.5 React 18/Vite/Tailwind UI на `:5173`, Authorization SSE и обязательные `data-state`
-  - [x] P1.6 Добавлены targeted unit + integration проверки retry/replay/cancel/partial/recovery/tenant/fallback; syntax/static review выполнен, полный runtime-прогон требуется в Docker-среде
-- [ ] P2: нагрузка и сдача
-  - [ ] P2.1 2 млн contacts, 5–20 workers: claim p95 <= 100 ms
-  - [ ] P2.2 Webhook 50 rps: p99 <= 1 s при slow/failing CRM
-  - [ ] P2.3 EXPLAIN/ошибки/окружение в performance report, исправление bottlenecks
-  - [ ] P2.4 Финальный clean `docker compose up -d`, browser/runtime verification и README/ASSUMPTIONS/AI-USAGE
+  - [x] P1.6 Добавлены targeted unit + integration проверки retry/replay/cancel/partial/recovery/tenant/fallback; syntax/static review выполнен, runtime-прогон выполнен в P2
+- [x] P2: нагрузка и сдача (отчёт: `docs/performance.md`)
+  - [x] P2.1 2 млн contacts, 5–20 workers: claim p95 12.7/36 ms (функция в БД ~2 ms; на медленном fsync хоста end-to-end до 220 ms)
+  - [x] P2.2 Webhook 50 rps: p99 403–430 ms при CRM 1.5 s / 50% 503
+  - [x] P2.3 EXPLAIN/ошибки/окружение в performance report, исправление bottlenecks (миграция 004)
+  - [x] P2.4 Clean `docker compose up -d`, acceptance 68/68, браузерная проверка data-state, README/ASSUMPTIONS/AI-USAGE
+  - [x] P2.5 Graceful restart (SIGTERM/SIGKILL) под нагрузкой, атомарность/ретраи/сбои (acceptance 82/82), UI для ручного прогона флоу
+  - [x] P2.6 Финальный прогон с нуля (.env из 4 переменных): up 37 s (initdb --no-sync), acceptance 82/82, resilience stop/kill PASS, UI dev/prod режимы

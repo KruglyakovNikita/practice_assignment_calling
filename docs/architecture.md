@@ -1,6 +1,6 @@
 # Архитектура
 
-P0 и P1 реализованы. Граница зависимостей: adapters → application/use-cases → domain. SQL-side claim/terminal trigger оставлены как намеренные исключения для атомарных DB-инвариантов.
+P0–P2 реализованы. Граница зависимостей: adapters → application/use-cases → domain. SQL-side claim/terminal trigger оставлены как намеренные исключения для атомарных DB-инвариантов.
 
 ## Структура
 
@@ -14,13 +14,15 @@ app/backend/src/
   analyses/domain
   analyses/application/{ports,use-cases}
   analyses/adapters/{http,sql,worker}
+  dev/                      # /dev/*, только при DEV_TOOLS=true
   shared/{auth,config,database,http,logging}
-app/web/
-packages/contracts/
-migrations/{001_p0_core.sql,002_p1_analysis.sql}
+app/web/src/{setup,call,analysis,shared/api}
+packages/contracts/        # общая Zod-схема результата
+migrations/001_p0_core.sql … 004_p2_claim_performance.sql
+scripts/                   # acceptance, resilience, load, dev-заглушки
 ```
 
-Use case — один публичный `execute()` на прикладной сценарий. Repository/port может иметь несколько cohesion-связанных persistence-операций; repository не является use case.
+Use case — один публичный `execute()` на прикладной сценарий; private helpers относятся к тому же сценарию. Repository/port может иметь несколько связанных persistence-операций одного агрегата — это обычный Repository pattern, а не нарушение правила «один use case на класс». Application/domain не импортируют NestJS, `pg` и React.
 
 ## P0 flows
 
@@ -40,7 +42,7 @@ Use case — один публичный `execute()` на прикладной �
 
 **Persistence.** Каждый chunk атомарно добавляется к `partial_result` и записывается в `analysis_events`. Валидный done проверяется общей Zod-схемой и сохраняется как `completed`. Invalid done → `error` с сохранёнными chunks. Обрыв/timeout после chunks → `partial`, без chunks → `error`.
 
-**Crash recovery.** Streaming job имеет lease + heartbeat. Просроченный lease не переотправляется провайдеру: recovery переводит job в `partial` либо `error`; cancel_requested → `cancelled`.
+**Crash recovery.** Streaming job имеет lease + heartbeat. Истёкший lease или graceful stop: если поток провайдера не начинался — job снова `queued`; иначе `partial`/`error` без повторной генерации; cancel_requested → `cancelled`.
 
 **SSE.** `GET /api/analyses/:id/stream` читает persisted journal. `analysis_events.id bigint` — стабильный SSE id; chunk также получает тот же `id` в data payload. `Last-Event-ID` → SQL `id > cursor`; disconnect клиента не влияет на provider job.
 
@@ -53,6 +55,8 @@ Use case — один публичный `execute()` на прикладной �
 - Worker использует service role с BYPASSRLS и ограниченными grants; внешний org_id не является authority.
 - JWT, secrets, transcript и provider payload не логируются.
 
-## P2 boundary
+## P2
 
-P2 не должен менять semantics P0/P1 без доказанной ошибки. Его задача — нагрузочные измерения, bottleneck fixes, clean compose/browser verification и финальный handoff.
+- Claim: `SECURITY DEFINER`, маркер активной попытки, partial-индекс `(campaign_id, timezone, cooldown, id)`, проба на каждую зону в окне (`docs/performance.md`).
+- Graceful shutdown: воркеры CRM и анализа дожидаются начатой работы, SSE закрываются, пулы БД закрываются после HTTP.
+- Dev-инструменты (`/dev/*`, dev-блоки UI) — только при `DEV_TOOLS=true`.

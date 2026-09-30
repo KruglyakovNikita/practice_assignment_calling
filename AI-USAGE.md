@@ -1,10 +1,25 @@
 # Использование ИИ
 
-- ChatGPT/Codex использованы для аудита ТЗ, проектирования и реализации P0/P1 backend, SQL, contracts, UI, targeted tests и документации.
-- Исходное ТЗ и ответы заказчика сохранены; дополнительные решения фиксируются в `ASSUMPTIONS.md` и `docs/decisions.md`.
-- P0 усилен signed-JWT RLS, raw-body HMAC, bigint sequence, duplicate/out-of-order state machine и transactional CRM outbox.
-- P1 реализован как persisted PostgreSQL job/journal: one-analysis-per-attempt, provider SSE, Retry-After, timeout/cancel/crash recovery, Last-Event-ID replay и React fetch-SSE UI.
-- Общая Zod-схема результата вынесена в `packages/contracts`; server/client validation не дублируется.
-- Архитектурное правило уточнено: один use case = один публичный `execute()`, repository может иметь несколько cohesion-связанных persistence methods.
-- Тесты добавлены только для critical paths: P0 core, transcript/SSE parser/invalid done и P1 integration retry/replay/tenant/fallback/partial/cancel.
-- В среде реализации Docker отсутствует, npm registry недоступен. Не заявляется фактический compose/integration run; выполнены source/static syntax checks и подготовлены команды полного прогона.
+## Инструменты
+
+- **ChatGPT / Codex** — разбор ТЗ, проектирование, первая реализация ядра (SQL, RLS, вебхуки, outbox), модуля анализа, UI, тестов и документации. Код на этом этапе проверялся только статически: Docker в той среде не было.
+- **Claude Code** — проверка на живом стенде в Docker, нагрузочные прогоны, исправления и документация. Сценарии проверки: `scripts/acceptance.mjs`, `scripts/resilience.mjs`, `scripts/load/*`.
+
+Решения и итоговый код проверены вручную, ответственность за поведение — на авторе.
+
+## Что переписывалось
+
+Найдено при прогоне на стенде и исправлено:
+
+- `POST /webhooks/calls` отвечал 500 на любое событие: у сервисной роли не было `SELECT` на `webhook_events`.
+- Параллельный claim последнего контакта давал 500 (гонка снапшотов); выдача переписана с маркером активной попытки.
+- Засев 2 млн контактов занял бы ~7 ч из-за `pg_timezone_names` в триггере.
+- `claim_next_contact` на 2 млн: p95 200+ мс с ростом на каждой выдаче; новый индекс, пробы по таймзонам, `SECURITY DEFINER`.
+- Zod 4 `.uuid()` отклонял валидные для PostgreSQL id вида `11111111-1111-…`.
+- `/dev/token` без авторизации выпускал JWT любой организации; закрыт флагом `DEV_TOOLS`.
+- CRM timeout 1.5 с: в медленную CRM не доставлялось ничего.
+- Остановка API под нагрузкой давала 500 на вебхуках и обрывала CRM-отправки и разборы; добавлен graceful shutdown.
+- Старт с нуля на HDD падал по healthcheck БД и шёл до 4 мин; `start_period` и `initdb --no-sync`.
+- UI переписан под ручную проверку всего флоу без обращения к БД.
+
+Цифры и полная таблица дефектов — `docs/performance.md`, решения — `ASSUMPTIONS.md`.

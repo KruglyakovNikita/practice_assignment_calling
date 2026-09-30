@@ -4,31 +4,34 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
   DATABASE_URL: z.string().min(1),
   DATABASE_SERVICE_URL: z.string().min(1),
+  DATABASE_DEV_URL: z.string().min(1).default('postgresql://postgres:postgres@db:5432/postgres'),
   JWT_SECRET: z.string().min(1),
   WEBHOOK_SECRET: z.string().min(1),
   CRM_URL: z.string().url(),
   PROVIDER_URL: z.string().url(),
   CORS_ORIGIN: z.string().min(1).default('http://localhost:5173'),
-  CRM_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
-  CRM_MAX_ATTEMPTS: z.coerce.number().int().positive().default(8),
-  CRM_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(20),
-  CRM_LEASE_MS: z.coerce.number().int().min(1000).default(15000),
+  CRM_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  CRM_MAX_ATTEMPTS: z.coerce.number().int().positive().default(20),
+  CRM_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(50),
+  CRM_LEASE_MS: z.coerce.number().int().min(1000).default(30000),
   CRM_POLL_MS: z.coerce.number().int().min(100).default(1000),
   CRM_RETRY_BASE_MS: z.coerce.number().int().min(100).default(1000),
-  CRM_RETRY_MAX_MS: z.coerce.number().int().min(1000).default(60000),
+  CRM_RETRY_MAX_MS: z.coerce.number().int().min(1000).default(300000),
   ANALYSIS_POLL_MS: z.coerce.number().int().min(50).default(200),
   ANALYSIS_LEASE_MS: z.coerce.number().int().min(3000).default(30000),
   ANALYSIS_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(4),
   ANALYSIS_PROVIDER_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
   ANALYSIS_PROVIDER_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(3),
   ANALYSIS_RECOVERY_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(20),
-  ANALYSIS_SSE_POLL_MS: z.coerce.number().int().min(50).default(150)
+  ANALYSIS_SSE_POLL_MS: z.coerce.number().int().min(50).default(150),
+  ANALYSIS_SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(5000)
 });
 
 export type runtimeConfig = {
   port: number;
   databaseUrl: string;
   databaseServiceUrl: string;
+  databaseDevUrl: string;
   jwtSecret: string;
   webhookSecret: string;
   crmUrl: string;
@@ -48,6 +51,7 @@ export type runtimeConfig = {
   analysisProviderMaxRetries: number;
   analysisRecoveryBatchSize: number;
   analysisSsePollMs: number;
+  analysisShutdownGraceMs: number;
 };
 
 export function loadRuntimeConfig(env: NodeJS.ProcessEnv): runtimeConfig {
@@ -56,6 +60,7 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv): runtimeConfig {
     port: parsed.PORT,
     databaseUrl: parsed.DATABASE_URL,
     databaseServiceUrl: parsed.DATABASE_SERVICE_URL,
+    databaseDevUrl: parsed.DATABASE_DEV_URL,
     jwtSecret: parsed.JWT_SECRET,
     webhookSecret: parsed.WEBHOOK_SECRET,
     crmUrl: parsed.CRM_URL,
@@ -74,6 +79,7 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv): runtimeConfig {
     analysisProviderTimeoutMs: parsed.ANALYSIS_PROVIDER_TIMEOUT_MS,
     analysisProviderMaxRetries: parsed.ANALYSIS_PROVIDER_MAX_RETRIES,
     analysisRecoveryBatchSize: parsed.ANALYSIS_RECOVERY_BATCH_SIZE,
-    analysisSsePollMs: parsed.ANALYSIS_SSE_POLL_MS
+    analysisSsePollMs: parsed.ANALYSIS_SSE_POLL_MS,
+    analysisShutdownGraceMs: parsed.ANALYSIS_SHUTDOWN_GRACE_MS
   };
 }
