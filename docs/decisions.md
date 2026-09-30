@@ -1,14 +1,21 @@
 # Решения
 
-1. P0 = критическое ядро разделов 4–6.1; P1 = анализ/SSE/UI; P2 = нагрузка и финальная сдача.
-2. PostgreSQL functions/triggers используются только там, где нужна атомарность: claim и terminal side effects.
-3. Tenant isolation P0: low-privilege DB role + forced RLS; `org_id` берётся из HS256 JWT, подпись повторно валидируется в PostgreSQL. Произвольный `SET org_id` не является boundary.
-4. Claim: campaign `FOR SHARE`, contact `FOR UPDATE SKIP LOCKED`, partial unique active attempt, local IANA window, 4h cooldown, max 3 attempts.
-5. Новые attempts получают `provider_call_id=id::text`; webhook всегда ищет по сохранённому provider_call_id и поддерживает произвольные string ids стенда.
-6. Webhook: raw-body HMAC, уникальность `provider_event_id` и `(provider_call_id,sequence)`, sequence хранится bigint без JS precision loss. Первый terminal status финален; stale events не откатывают status.
-7. Terminal trigger атомарно обновляет contact и создаёт одну outbox row. CRM HTTP выполняется позже, вне DB transaction.
-8. CRM delivery: DB lease + `SKIP LOCKED`, lease token, timeout, bounded exponential retry, `dead` после лимита; at-least-once допустим.
-9. Не логировать JWT, secrets, transcript или full webhook payload. Correlation id проходит request → webhook_events/call_attempt → outbox.
-10. `call_attempts.transcript text NULL` добавлен заранее для совместимости P1 по ответу заказчика; analysis endpoints ещё отсутствуют.
-11. Redis/broker не добавляются: в текущем scope PostgreSQL queue/outbox достаточно и проще для тестового.
-12. Performance SLA не объявляется достигнутым без реального load run в P2.
+1. P0 = критическое ядро; P1 = analysis/SSE/UI; P2 = нагрузка и финальная сдача.
+2. PostgreSQL functions/triggers используются только для атомарных P0 правил: claim и terminal side effects.
+3. Tenant isolation: low-privilege DB role + forced RLS; `org_id` берётся из HS256 JWT, подпись повторно проверяется в PostgreSQL.
+4. Claim: campaign `FOR SHARE`, contact `FOR UPDATE SKIP LOCKED`, partial unique active attempt, local IANA window, cooldown/max attempts.
+5. Webhook: raw-body HMAC, bigint sequence без JS precision loss, dedup/out-of-order, first-terminal-wins.
+6. CRM: transactional outbox; network вне webhook transaction; lease + bounded retry/dead.
+7. Use case = один публичный сценарий/`execute()`. Private steps того же сценария допустимы. Repository может иметь несколько cohesion-связанных persistence methods; не дробится по одному SQL-вызову.
+8. Analysis создаётся только для terminal call attempt; `UNIQUE(call_attempt_id)` гарантирует один analysis. Повторный POST не генерирует заново.
+9. Transcript берётся из `call_attempts.transcript`; NULL/blank/whitespace заменяется фиксированным fallback только при provider request, исходное поле не переписывается.
+10. Analysis processing — PostgreSQL persisted queue с `SKIP LOCKED` lease. Broker/Redis не добавляется до измеренной необходимости.
+11. 429 повторяется только по `Retry-After` и bounded max retries. После начала SSE auto-restart generation запрещён.
+12. Provider stream break/timeout с chunks → partial; без chunks → error. Invalid `done` всегда → error, накопленные chunks сохраняются.
+13. Cancel queued сразу terminal; cancel streaming выставляет `cancel_requested` и abort-ит локальный fetch. Другой worker увидит cancel на heartbeat.
+14. Streaming lease expiry означает process interruption: recovery завершает analysis partial/error/cancelled и не вызывает provider повторно.
+15. SSE journal persisted в `analysis_events`; DB id — стабильный SSE id, chunk payload содержит тот же id; `Last-Event-ID` читает только продолжение.
+16. UI использует fetch-based SSE из-за Bearer Authorization/Last-Event-ID. Native EventSource не является обязательной частью решения.
+17. Общий `analysisResultSchema` живёт в `packages/contracts` и валидирует финал на backend и frontend.
+18. Не логировать JWT, secrets, transcript или full provider/webhook payload.
+19. Performance SLA считается достигнутым только после P2 load run.

@@ -3,10 +3,12 @@
   "private": true,
   "packageManager": "pnpm@10.17.1",
   "scripts": {
-    "build": "pnpm --filter @auto-calling/backend build",
-    "typecheck": "pnpm --filter @auto-calling/backend typecheck",
+    "build": "pnpm --filter @auto-calling/contracts build && pnpm --filter @auto-calling/backend build && pnpm --filter @auto-calling/web build",
+    "typecheck": "pnpm --filter @auto-calling/contracts build && pnpm --filter @auto-calling/backend typecheck && pnpm --filter @auto-calling/web typecheck",
     "test:p0": "pnpm --filter @auto-calling/backend test:p0",
     "test:p0:integration": "pnpm --filter @auto-calling/backend test:p0:integration",
-    "jwt:generate": "pnpm --filter @auto-calling/backend jwt:generate"
+    "jwt:generate": "pnpm --filter @auto-calling/backend jwt:generate",
+    "test:p1": "pnpm --filter @auto-calling/contracts build && pnpm --filter @auto-calling/backend test:p1",
+    "test:p1:integration": "pnpm --filter @auto-calling/contracts build && pnpm --filter @auto-calling/backend test:p1:integration"
   }
 }

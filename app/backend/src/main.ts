@@ -13,6 +13,8 @@ async function bootstrap(): Promise<void> {
   });
   app.enableShutdownHooks();
   const config = app.get<runtimeConfig>(RUNTIME_CONFIG);
+  const corsOrigins = [...new Set([config.corsOrigin, 'http://localhost:5173', 'http://127.0.0.1:5173'])];
+  app.enableCors({ origin: corsOrigins, allowedHeaders: ['authorization', 'content-type', 'last-event-id'] });
   await app.listen(config.port, '0.0.0.0');
 }
 

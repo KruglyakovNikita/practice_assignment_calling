@@ -1,8 +1,8 @@
 # Архитектура
 
-P0 реализован. Архитектура остаётся минимальной Clean Architecture: adapters → application/use-cases → domain. SQL-функция claim и terminal trigger — намеренные DB-side исключения для атомарных правил задания.
+P0 и P1 реализованы. Граница зависимостей: adapters → application/use-cases → domain. SQL-side claim/terminal trigger оставлены как намеренные исключения для атомарных DB-инвариантов.
 
-## P0 structure
+## Структура
 
 ```text
 app/backend/src/
@@ -11,36 +11,48 @@ app/backend/src/
   calls/adapters/{http,sql}
   crm/application/{ports,use-cases}
   crm/adapters/{http,sql,cron}
+  analyses/domain
+  analyses/application/{ports,use-cases}
+  analyses/adapters/{http,sql,worker}
   shared/{auth,config,database,http,logging}
-  health
-migrations/001_p0_core.sql
-scripts/{apply-migrations.sh,bootstrap-roles.sql,sync-runtime-settings.sql}
+app/web/
+packages/contracts/
+migrations/{001_p0_core.sql,002_p1_analysis.sql}
 ```
 
-## Потоки
+Use case — один публичный `execute()` на прикладной сценарий. Repository/port может иметь несколько cohesion-связанных persistence-операций; repository не является use case.
 
-**Claim.** HTTP JWT guard валидирует HS256 → adapter открывает tenant DB transaction → `SET LOCAL app.jwt` → SQL `claim_next_contact` повторно проверяет JWT внутри PostgreSQL через RLS context → campaign row lock + contact `FOR UPDATE SKIP LOCKED` → queued attempt с `provider_call_id=attempt_id::text`.
+## P0 flows
 
-**Webhook.** Nest сохраняет raw body → HMAC guard → controller извлекает top-level `sequence` как bigint без JS number → service-role DB transaction блокирует attempt по `provider_call_id` → сохраняет уникальное событие → state reducer решает допустимый patch → update attempt. Terminal trigger в той же транзакции обновляет contact и создаёт outbox.
+**Claim.** JWT → tenant transaction + signed-JWT RLS → SQL `claim_next_contact` → `FOR UPDATE SKIP LOCKED` → queued attempt.
 
-**CRM.** Worker периодически арендует bounded batch через `FOR UPDATE SKIP LOCKED`, коммитит lease, затем делает HTTP вне DB transaction. Success/failure фиксируются отдельным update по lease token; expired lease можно взять повторно. Доставка at-least-once, retry bounded, после лимита `dead`.
+**Webhook.** raw-body HMAC → provider_call_id lookup → unique event → monotonic reducer → terminal trigger → contact side effects + CRM outbox в одной транзакции.
 
-## Security/tenant model
+**CRM.** lease batch через `SKIP LOCKED`; HTTP выполняется вне транзакции; bounded retry/dead state.
 
-- API JWT: HS256, `sub`, `org_id`, `role=worker|authenticated`.
-- Tenant DB role не superuser и не BYPASSRLS. RLS извлекает `org_id` только из JWT, подпись которого проверяется SECURITY DEFINER функцией с secret в закрытой таблице `app_private.settings`.
-- Простое `SET app.org_id` не существует как security boundary. `app.jwt` можно выставить, но поддельный JWT не проходит HMAC DB verification.
-- Webhook/background используют отдельную `auto_calling_service` role: BYPASSRLS нужен для cross-tenant lookup, но DML grants ограничены `call_attempts`, `webhook_events`, `crm_outbox`. Postgres superuser остаётся только в migration service. Эти пути не принимают org_id из payload как authority.
-- `public` schema CREATE отозван; SECURITY DEFINER функции имеют фиксированный `search_path`.
+## P1 analysis flow
 
-## State invariants
+**Create.** `POST /api/analyses` под tenant JWT проверяет call attempt через RLS. Допускается только terminal attempt. `UNIQUE(call_attempt_id)` гарантирует один analysis; повторный POST возвращает существующий фактический status.
 
-- Active: queued/dialing/in_progress. На contact максимум одна active attempt через partial unique index.
-- Terminal: completed/failed/no_answer. Первый terminal status финален.
-- `last_sequence` монотонно растёт. Старые события сохраняются, но не откатывают status. Late answered может заполнить пустой started_at.
-- `provider_event_id` и `(provider_call_id, sequence)` уникальны.
-- CRM side effects возникают только на nonterminal→terminal transition.
+**Worker.** `AnalysisWorker` держит ограниченное число in-flight jobs. Service repository атомарно claim-ит queued analysis, переводит в `streaming`, выдаёт lease token и читает `call_attempts.transcript`. NULL/blank заменяется fallback только перед provider request.
 
-## P1 boundary
+**Provider.** `ProcessNextAnalysisUseCase` вызывает `{PROVIDER_URL}/v1/analyze`. 429 повторяется по `Retry-After`, retry count bounded. HTTP/stream timeout и cancel используют AbortSignal. После начала stream сетевой обрыв не запускает новую генерацию.
 
-`call_attempts.transcript text NULL` уже присутствует, но analysis API/provider/SSE/UI не входят в P0. P1 не должен менять P0 state machine, tenant model или CRM transaction boundaries.
+**Persistence.** Каждый chunk атомарно добавляется к `partial_result` и записывается в `analysis_events`. Валидный done проверяется общей Zod-схемой и сохраняется как `completed`. Invalid done → `error` с сохранёнными chunks. Обрыв/timeout после chunks → `partial`, без chunks → `error`.
+
+**Crash recovery.** Streaming job имеет lease + heartbeat. Просроченный lease не переотправляется провайдеру: recovery переводит job в `partial` либо `error`; cancel_requested → `cancelled`.
+
+**SSE.** `GET /api/analyses/:id/stream` читает persisted journal. `analysis_events.id bigint` — стабильный SSE id; chunk также получает тот же `id` в data payload. `Last-Event-ID` → SQL `id > cursor`; disconnect клиента не влияет на provider job.
+
+**UI.** React использует fetch-based SSE, чтобы передавать Bearer JWT и `Last-Event-ID`. Root container имеет `data-state=idle|queued|streaming|reconnecting|partial|error|cancelled|completed`; partial не очищается при reconnect/error.
+
+## Security
+
+- Tenant API: HS256 JWT + forced RLS с повторной проверкой JWT в PostgreSQL.
+- Analysis rows/events имеют `org_id`, composite FK и RLS; foreign org получает 404.
+- Worker использует service role с BYPASSRLS и ограниченными grants; внешний org_id не является authority.
+- JWT, secrets, transcript и provider payload не логируются.
+
+## P2 boundary
+
+P2 не должен менять semantics P0/P1 без доказанной ошибки. Его задача — нагрузочные измерения, bottleneck fixes, clean compose/browser verification и финальный handoff.

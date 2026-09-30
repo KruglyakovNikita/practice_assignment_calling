@@ -1,6 +1,6 @@
 import 'dotenv/config';
-import { sign } from 'jsonwebtoken';
 import { z } from 'zod';
+import { signJwt } from './sign-jwt';
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -25,10 +25,6 @@ const input = z.object({
   secret: process.env.JWT_SECRET
 });
 
-const token = sign(
-  { org_id: input.orgId, role: input.role },
-  input.secret,
-  { algorithm: 'HS256', subject: input.sub, expiresIn: '1h' }
-);
+const token = signJwt(input);
 
 process.stdout.write(`${token}\n`);

@@ -1,30 +1,34 @@
 # Сервис управления обзвоном — инструкции Codex
 
-P0 реализован. Текущая цель следующего этапа — P1 из `docs/progress.md`; P0 invariants менять только при доказанной ошибке.
+P0 и P1 реализованы. Текущая цель — P2 из `docs/progress.md`; P0/P1 invariants менять только при доказанной ошибке.
 
 ## Source of truth
 
-Читать: `docs/progress.md`, `docs/p0-plan.md`, `docs/tz.md`, `docs/decisions.md`, `docs/architecture.md`, `docs/database.md`, `ASSUMPTIONS.md`, `docs/code-style.md`. Исходники задания: `docs/Тестовое задание. Full stack.md`, `docs/additional_description_to_task.md`, `docs/answer_to_the_question.md` — не редактировать по смыслу.
+Читать: `docs/progress.md`, `docs/tz.md`, `docs/decisions.md`, `docs/architecture.md`, `docs/database.md`, `ASSUMPTIONS.md`, `docs/code-style.md`, `docs/p1-completion.md`. Исходники задания и ответы заказчика не менять по смыслу.
 
 `.claude/` и `CLAUDE.md` — архив, не действующие инструкции.
 
 ## P0 invariants
 
-- `claim_next_contact` остаётся SQL-side, `SKIP LOCKED`; одна active attempt на contact.
-- Tenant isolation не переводить на доверенный `SET org_id`. RLS использует signed JWT context; app role не BYPASSRLS.
-- Webhook HMAC только по raw body; `sequence` не приводить к JS number с потерей bigint.
-- Lookup webhook только по `provider_call_id`; unknown call не создаёт attempt/event.
-- Duplicate/out-of-order event не откатывает state; первый terminal финален; late answered может дополнить started_at.
-- Terminal contact update и outbox insert атомарны; CRM network не выполнять в webhook transaction.
-- Outbox lease/retry bounded; не делать бесконечный retry и не держать DB lock во время HTTP.
-- Не логировать JWT/secrets/transcript/full payload.
+- SQL `claim_next_contact` + `SKIP LOCKED`; одна active attempt на contact.
+- Signed-JWT forced RLS; не заменять на доверенный `SET org_id`.
+- Webhook raw-body HMAC, bigint sequence, duplicate/out-of-order, first-terminal-wins.
+- Terminal side effects + CRM outbox атомарны; CRM HTTP вне webhook transaction.
 
-## P1
+## P1 invariants
 
-Реализовать только раздел 7: один analysis на attempt, transcript fallback, provider SSE/429/cancel/partial/error, persisted SSE journal/Last-Event-ID, React UI. Не добавлять registration/admin/campaign CRUD/реальный LLM.
+- Один analysis на call attempt; repeat POST не вызывает provider снова.
+- Transcript берётся из `call_attempts.transcript`; blank/null fallback только на provider boundary.
+- Provider 429 — только bounded Retry-After retries до начала stream.
+- После начала stream auto-regeneration запрещён. Break/timeout с chunks → partial, без chunks → error; invalid done → error.
+- Cancel сохраняет chunks. Expired worker lease завершает job partial/error/cancelled, а не requeue.
+- `analysis_events` — persisted SSE journal; stable id + Last-Event-ID continuation.
+- Общая result schema только в `packages/contracts`.
+- UI root `data-state` должен различать idle/queued/streaming/reconnecting/partial/error/cancelled/completed.
+- JWT/secrets/transcript/full provider payload не логировать.
 
-## Style/verification
+## Architecture/style
 
-Clean Architecture: adapters → application/use-cases → domain. TypeScript strict; type/interface lower camelCase, class/component PascalCase. Комментарии только для неочевидного инварианта, максимум коротко. Писать только tests, доказывающие контракт/critical failure path.
+Clean Architecture: adapters → application/use-cases → domain. Один use case-класс = один публичный `execute()`. Private helpers допустимы. Repository/port может иметь несколько связанных persistence methods; не дробить на класс на каждый SQL.
 
-`docs/progress.md` отмечать `[x]` только после фактической проверки. Нагрузочные p95/p99 — только после измерения. Работать в текущей ветке, не затирать пользовательские изменения.
+P2 performance claims отмечать только после измерения. Не добавлять Redis/broker без подтверждённого bottleneck.

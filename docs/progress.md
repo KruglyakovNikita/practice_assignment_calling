@@ -4,16 +4,16 @@
   - [x] P0.3 SQL `claim_next_contact`, `SKIP LOCKED`, active-attempt uniqueness, provider_call_id convention
   - [x] P0.4 JWT API + HMAC raw-body webhook, dedup, bigint sequence, out-of-order/terminal state rules
   - [x] P0.5 Terminal trigger + CRM transactional outbox, lease/retry/dead-state, correlation id
-  - [x] P0.6 6/6 pure unit tests пройдены; DB/API integration smoke добавлен, полный runtime-прогон выполняется `scripts/verify-p0.sh` в среде с Docker/PostgreSQL
-- [ ] P1: анализ звонка и UI
-  - [ ] P1.1 Общая Zod-схема результата и transcript fallback
-  - [ ] P1.2 POST/GET/cancel analysis, один analysis на attempt, persisted job state
-  - [ ] P1.3 Provider SSE, Retry-After 429, timeout/cancel/partial/error/invalid done
-  - [ ] P1.4 Persisted SSE journal + Last-Event-ID replay без повторной генерации
-  - [ ] P1.5 React 18/Vite/Tailwind одна страница с обязательными `data-state`
-  - [ ] P1.6 Сквозные проверки reconnect/cancel/partial/tenant isolation/transcript cases
+  - [x] P0.6 P0 unit/integration smoke присутствуют; runtime integration запускается в Docker-среде
+- [x] P1: анализ звонка и UI — реализация завершена
+  - [x] P1.1 Общая Zod-схема результата в `packages/contracts` + transcript fallback
+  - [x] P1.2 POST/GET/cancel analysis, один analysis на attempt, persisted job state/RLS
+  - [x] P1.3 Provider SSE, Retry-After 429, timeout/cancel/partial/error/invalid done
+  - [x] P1.4 Persisted SSE journal + stable id + Last-Event-ID replay без повторной генерации
+  - [x] P1.5 React 18/Vite/Tailwind UI на `:5173`, Authorization SSE и обязательные `data-state`
+  - [x] P1.6 Добавлены targeted unit + integration проверки retry/replay/cancel/partial/recovery/tenant/fallback; syntax/static review выполнен, полный runtime-прогон требуется в Docker-среде
 - [ ] P2: нагрузка и сдача
   - [ ] P2.1 2 млн contacts, 5–20 workers: claim p95 <= 100 ms
   - [ ] P2.2 Webhook 50 rps: p99 <= 1 s при slow/failing CRM
   - [ ] P2.3 EXPLAIN/ошибки/окружение в performance report, исправление bottlenecks
-  - [ ] P2.4 Финальный clean `docker compose up -d`, README/ASSUMPTIONS/AI-USAGE и UI contract
+  - [ ] P2.4 Финальный clean `docker compose up -d`, browser/runtime verification и README/ASSUMPTIONS/AI-USAGE

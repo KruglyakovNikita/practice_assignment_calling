@@ -48,6 +48,7 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
       CRM_URL: ${CRM_URL}
       PROVIDER_URL: ${PROVIDER_URL}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
       CRM_TIMEOUT_MS: ${CRM_TIMEOUT_MS:-1500}
       CRM_MAX_ATTEMPTS: ${CRM_MAX_ATTEMPTS:-8}
       CRM_BATCH_SIZE: ${CRM_BATCH_SIZE:-20}
@@ -55,13 +56,32 @@ services:
       CRM_POLL_MS: ${CRM_POLL_MS:-1000}
       CRM_RETRY_BASE_MS: ${CRM_RETRY_BASE_MS:-1000}
       CRM_RETRY_MAX_MS: ${CRM_RETRY_MAX_MS:-60000}
+      ANALYSIS_POLL_MS: ${ANALYSIS_POLL_MS:-200}
+      ANALYSIS_LEASE_MS: ${ANALYSIS_LEASE_MS:-30000}
+      ANALYSIS_CONCURRENCY: ${ANALYSIS_CONCURRENCY:-4}
+      ANALYSIS_PROVIDER_TIMEOUT_MS: ${ANALYSIS_PROVIDER_TIMEOUT_MS:-30000}
+      ANALYSIS_PROVIDER_MAX_RETRIES: ${ANALYSIS_PROVIDER_MAX_RETRIES:-3}
+      ANALYSIS_RECOVERY_BATCH_SIZE: ${ANALYSIS_RECOVERY_BATCH_SIZE:-20}
+      ANALYSIS_SSE_POLL_MS: ${ANALYSIS_SSE_POLL_MS:-150}
     ports:
       - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 2s
       retries: 20
+
+  web:
+    build:
+      context: .
+      dockerfile: app/web/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:5173"
 
 volumes:
   auto-calling-db:

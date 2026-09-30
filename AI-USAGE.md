@@ -1,7 +1,10 @@
 # Использование ИИ
 
-- ChatGPT/Codex использованы для аудита ТЗ, уточнения архитектуры, подготовки P0 plan и реализации P0 backend/SQL/tests/docs.
-- Исходное задание и ответы заказчика сохранены. Решения, не заданные напрямую, вынесены в `ASSUMPTIONS.md`/`docs/decisions.md`.
-- После аудита отдельно усилены: signed-JWT RLS context, HMAC raw-body verification, bigint sequence, duplicate/out-of-order state machine, transactional outbox, lease/retry/dead-state и correlation id.
-- Добавлены только критические P0 tests: state/security/retry unit tests и один DB/API integration smoke.
-- В текущей рабочей среде npm registry и Docker/PostgreSQL недоступны, поэтому dependencies/build/integration не приписываются как запущенные. Выполнена локальная статическая проверка исходников; команды полного прогона находятся в README.
+- ChatGPT/Codex использованы для аудита ТЗ, проектирования и реализации P0/P1 backend, SQL, contracts, UI, targeted tests и документации.
+- Исходное ТЗ и ответы заказчика сохранены; дополнительные решения фиксируются в `ASSUMPTIONS.md` и `docs/decisions.md`.
+- P0 усилен signed-JWT RLS, raw-body HMAC, bigint sequence, duplicate/out-of-order state machine и transactional CRM outbox.
+- P1 реализован как persisted PostgreSQL job/journal: one-analysis-per-attempt, provider SSE, Retry-After, timeout/cancel/crash recovery, Last-Event-ID replay и React fetch-SSE UI.
+- Общая Zod-схема результата вынесена в `packages/contracts`; server/client validation не дублируется.
+- Архитектурное правило уточнено: один use case = один публичный `execute()`, repository может иметь несколько cohesion-связанных persistence methods.
+- Тесты добавлены только для critical paths: P0 core, transcript/SSE parser/invalid done и P1 integration retry/replay/tenant/fallback/partial/cancel.
+- В среде реализации Docker отсутствует, npm registry недоступен. Не заявляется фактический compose/integration run; выполнены source/static syntax checks и подготовлены команды полного прогона.
